@@ -1,0 +1,37 @@
+# Configuration par defaut de radicale-hardened.
+#
+# Seules les valeurs qui different de celles de Radicale sont ecrites ici
+# (reference complete : https://radicale.org/v3.html#configuration). Pour la
+# remplacer, monter un fichier sur /etc/radicale/config (lecture seule) ; une
+# option absente reprend la valeur par defaut de Radicale, pas celle-ci.
+
+[server]
+# Dans un conteneur, localhost n'est joignable que du conteneur lui-meme.
+hosts = 0.0.0.0:5232, [::]:5232
+
+[auth]
+# Radicale refuse tout par defaut (denyall). L'image attend un fichier
+# htpasswd monte en lecture seule : l'init refuse de demarrer sans lui.
+# bcrypt (htpasswd -B) est compile dans l'image ; autodetect reconnait aussi
+# SHA-512/SHA-256 crypt et argon2 n'est pas embarque.
+type = htpasswd
+htpasswd_filename = /etc/radicale/users
+htpasswd_encryption = autodetect
+# Une connexion bcrypt coute ~250 ms : sans cache, chaque requete d'un
+# client CalDAV la repaie.
+cache_logins = true
+# Une seconde d'attente apres un echec (defaut de Radicale) : rend le
+# bourrage de mots de passe couteux.
+delay = 1
+
+[rights]
+# Chaque utilisateur ne voit que ses collections (defaut de Radicale, ecrit
+# pour etre lu).
+type = owner_only
+
+[storage]
+filesystem_folder = /var/lib/radicale/collections
+
+[logging]
+level = info
+mask_passwords = true

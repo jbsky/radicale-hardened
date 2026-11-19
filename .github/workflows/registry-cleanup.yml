@@ -1,0 +1,22 @@
+# =====================================================================
+#  Registry Cleanup -- purge des anciens tags immuables, a la demande.
+#  build-push appelle directement jbsky/hardened-ci apres chaque
+#  publication ; ce fichier ne sert qu'au lancement manuel (rattrapage).
+# =====================================================================
+name: registry-cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prune:
+    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@09430d5a0016b9a356ae9f4ff4ecd642d0f437d5 # v1.4.9
+    with:
+      images: '["radicale-hardened"]'
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

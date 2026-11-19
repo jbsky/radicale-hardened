@@ -1,0 +1,38 @@
+x-common-security: &common-security
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  radicale:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Pas de build.args : `make build` passe --build-arg depuis versions.json.
+      # Un `docker compose build` nu echoue au garde du Dockerfile.
+      secrets:
+        - ca-certs
+    image: localhost/radicale-hardened:latest
+    <<: *common-security
+    ports:
+      - "5232:5232"
+    volumes:
+      - radicale-data:/var/lib/radicale/collections
+      # Fichier htpasswd (htpasswd -B), en lecture seule. `make users` en
+      # cree un de test ; en production, RADICALE_USERS=/chemin/users.
+      - ${RADICALE_USERS:-./users}:/etc/radicale/users:ro
+    tmpfs:
+      - /tmp:nodev,nosuid,noexec,size=16m,mode=1777
+
+secrets:
+  ca-certs:
+    file: ${CA_CERTS:-/dev/null}
+
+volumes:
+  radicale-data:

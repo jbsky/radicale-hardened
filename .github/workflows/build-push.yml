@@ -1,0 +1,54 @@
+# =====================================================================
+#  build-push -- radicale-hardened
+#  Tout le pipeline vient du gabarit de jbsky/hardened-ci (lint, build,
+#  tests sur le digest exact, garde de revision, promotion signee, SBOM
+#  attestee, README, purge, release, issue si echec).
+#  Ce depot ne decrit que ce qui le distingue : .github/hardened-ci.json.
+#  Le filtre paths: doit couvrir les entrees du compteur de revision : le
+#  gabarit le verifie (hci-config.py --check).
+# =====================================================================
+name: build-push
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths:
+      - 'Dockerfile'
+      - 'init.go'
+      - 'init_test.go'
+      - 'go.mod'
+      - 'config/**'
+      - 'requirements.txt'
+      - 'requirements-build.txt'
+      - 'scripts/**'
+      # versions.json porte les build-args et le tag ; docker-compose.yml et
+      # le Makefile portent le chemin de build local. Un fichier absent de
+      # ce filtre est un fichier dont le changement n'est jamais construit.
+      - 'versions.json'
+      - 'docker-compose.yml'
+      - 'Makefile'
+      - 'image.manifest'
+      - '.hadolint.yaml'
+      - '.github/hardened-ci.json'
+      - '.github/workflows/build-push.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    uses: jbsky/hardened-ci/.github/workflows/build-push.yml@09430d5a0016b9a356ae9f4ff4ecd642d0f437d5 # v1.4.9
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      issues: write
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
