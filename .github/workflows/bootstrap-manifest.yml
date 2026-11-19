@@ -1,0 +1,35 @@
+# TEMPORAIRE -- genere image.manifest depuis l'image construite, une fois,
+# sur la branche de creation du depot. Retire dans le commit suivant.
+name: bootstrap-manifest
+on:
+  push:
+    branches: [feat/radicale-hardened]
+    paths: ['.github/workflows/bootstrap-manifest.yml']
+permissions:
+  contents: write
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: jbsky/hardened-ci
+          ref: 09430d5a0016b9a356ae9f4ff4ecd642d0f437d5 # v1.4.9
+          path: .hardened-ci
+      - name: Build et manifeste
+        run: |
+          set -euo pipefail
+          CA_CERTS="$(pwd)/.ca-vide.crt"
+          : > "$CA_CERTS"
+          export CA_CERTS
+          make build
+          rm -f "$CA_CERTS"
+          python3 .hardened-ci/scripts/image-manifest.py --generate localhost/radicale-hardened:latest -o image.manifest
+          docker image inspect -f '{{.Size}}' localhost/radicale-hardened:latest
+          rm -rf .hardened-ci
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add image.manifest
+          git commit -m "build: image.manifest genere depuis l'image construite" -m "Signed-off-by: jbsky <webmaster@jbsky.fr>"
+          git push
