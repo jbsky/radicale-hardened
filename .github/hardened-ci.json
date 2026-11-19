@@ -1,0 +1,13 @@
+{
+  "image": "radicale-hardened",
+  "version": {"key": "radicale"},
+  "revision": ["radicale", "Dockerfile", "init.go", "go.mod", "config/", "requirements.txt", "requirements-build.txt", "versions.json"],
+  "platforms": ["linux/amd64"],
+  "compose_service": "radicale",
+  "setup": "./scripts/ci-users.sh",
+  "probes": [
+    {"label": "Radicale", "want": "version", "cmd": "docker run --rm --entrypoint /usr/local/bin/python3 \"$IMAGE\" -I -c 'import radicale; print(radicale.VERSION)'", "regex": "^[0-9][0-9.]*"},
+    {"label": "Python", "want": "python", "cmd": "docker run --rm --entrypoint /usr/local/bin/python3 \"$IMAGE\" -V", "regex": "Python \\K3\\.[0-9]+"}
+  ],
+  "smoke": "./scripts/test.sh \"$IMAGE\""
+}

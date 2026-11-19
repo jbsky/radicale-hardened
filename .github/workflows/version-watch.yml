@@ -1,0 +1,165 @@
+# =====================================================================
+#  Version Watch -- Radicale Hardened
+#  Quotidien : monte versions.json vers la derniere version de Radicale sur
+#  PyPI et republie, sans main humaine.
+#
+#  Meme chaine que base-watch, qui l'a eprouvee : bump -> commit -> push ->
+#  dispatch de build-push. Un push fait avec GITHUB_TOKEN ne declenche aucun
+#  `on: push` (garde anti-recursion de GitHub), d'ou le dispatch explicite.
+#
+#  Ancrage de confiance : Radicale publie sur PyPI par Trusted Publishing.
+#  L'attestation de la roue est verifiee ICI (pypi-attestations, identite
+#  Kozea/Radicale) avant que son sha256 n'entre dans versions.json -- au
+#  build, ce sha256 fait foi (pip --require-hashes). Un sha256 recopie d'un
+#  fichier non authentifie ne protegerait de rien.
+#
+#  Une version qui exige une dependance absente ou trop ancienne du lockfile
+#  (requirements.txt) est refusee ici, avant tout commit : `pip check` sur le
+#  lockfile + la roue cible. Le run passe au rouge et rien n'est publie ; la
+#  montee se fait alors a la main, lockfile compris.
+# =====================================================================
+name: version-watch
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Relever l'ecart et s'arreter la (ni commit, ni push, ni publication)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Monter vers l'amont
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      # Version de l'outil de verification, epinglee : il decide de ce qui
+      # entre dans l'image.
+      PYPI_ATTESTATIONS: "0.0.31"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Monter Radicale si besoin
+        id: radicale
+        run: |
+          set -euo pipefail
+          current=$(jq -r '.radicale' versions.json)
+          meta="${RUNNER_TEMP}/radicale.json"
+          curl -fsSL https://pypi.org/pypi/radicale/json -o "$meta"
+          latest=$(jq -r '.info.version' "$meta")
+          test -n "$latest" || { echo "::error::aucune version lue sur PyPI"; exit 1; }
+          echo "- Radicale : versions.json ${current}, PyPI ${latest}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${current}" = "${latest}" ]; then
+            echo "change=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Une pre-version n'est jamais servie comme .info.version par PyPI ;
+          # le garde est la si cela changeait.
+          if ! printf '%s' "$latest" | grep -qE '^[0-9]+(\.[0-9]+)+$'; then
+            echo "::error::version PyPI inattendue : ${latest}"
+            exit 1
+          fi
+          echo "change=true" >> "$GITHUB_OUTPUT"
+          echo "cible=${latest}" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "--dry-run : ${current} -> ${latest}, rien ecrit."
+            exit 0
+          fi
+
+          curl -fsSL "https://pypi.org/pypi/radicale/${latest}/json" -o "$meta"
+          wheel=$(jq -r '[.urls[] | select(.packagetype == "bdist_wheel" and (.filename | endswith("-py3-none-any.whl")))] | if length == 1 then .[0].filename else error("roue py3-none-any introuvable ou multiple") end' "$meta")
+          url=$(jq -r --arg f "$wheel" '.urls[] | select(.filename == $f) | .url' "$meta")
+          declared=$(jq -r --arg f "$wheel" '.urls[] | select(.filename == $f) | .digests.sha256' "$meta")
+          dl="${RUNNER_TEMP}/dl"
+          mkdir -p "$dl"
+          curl -fsSL "$url" -o "${dl}/${wheel}"
+          sha256=$(sha256sum "${dl}/${wheel}" | cut -d' ' -f1)
+          test "$sha256" = "$declared" || { echo "::error::sha256 ${sha256} != ${declared} annonce par PyPI"; exit 1; }
+
+          # Le VRAI ancrage : l'attestation Trusted Publishing, liee au depot
+          # Kozea/Radicale. Le sha256 n'est ecrit qu'APRES.
+          pipx run "pypi-attestations==${PYPI_ATTESTATIONS}" verify pypi \
+            --repository https://github.com/Kozea/Radicale "${dl}/${wheel}"
+          echo "- attestation PyPI verifiee : ${wheel} publie par Kozea/Radicale" >> "$GITHUB_STEP_SUMMARY"
+
+          # Les dependances de la cible doivent etre satisfaites par le
+          # lockfile tel qu'il est : sinon le build le refuserait (pip check)
+          # apres le commit, et main resterait sur une version non construite.
+          # bcrypt est ecarte : Radicale ne le declare pas (extra), et pip
+          # check n'a besoin que des metadonnees -- inutile de le compiler.
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          awk '/^bcrypt==/ {skip = 1; next} skip && /^[[:space:]]/ {next} {skip = 0; print}' \
+            requirements.txt > "${RUNNER_TEMP}/req-sans-bcrypt.txt"
+          "${RUNNER_TEMP}/venv/bin/pip" install -q --require-hashes --no-deps --only-binary :all: \
+            -r "${RUNNER_TEMP}/req-sans-bcrypt.txt"
+          "${RUNNER_TEMP}/venv/bin/pip" install -q --no-deps "${dl}/${wheel}"
+          if ! "${RUNNER_TEMP}/venv/bin/pip" check; then
+            echo "::error::Radicale ${latest} exige des dependances que requirements.txt ne fournit pas : montee manuelle"
+            exit 1
+          fi
+
+          jq --arg v "${latest}" --arg h "${sha256}" \
+            '.radicale = $v | .radicale_sha256 = $h' versions.json > "${RUNNER_TEMP}/versions.json"
+          mv "${RUNNER_TEMP}/versions.json" versions.json
+
+      # site-packages est inventorie fichier par fichier dans image.manifest :
+      # une montee de Radicale le deplace presque toujours, et le job
+      # `Functional tests` de build-push refuserait le manifeste perime. Le
+      # regenerer ici, AVANT le commit, c'est la procedure manuelle ("make
+      # build" + "image-manifest.py --generate") jouee par la veille.
+      # image-manifest.py vit dans jbsky/hardened-ci -- meme pin que
+      # build-push.yml : si ce pin bouge, celui-ci suit dans le MEME commit.
+      - name: hardened-ci a la ref de build-push.yml
+        if: steps.radicale.outputs.change == 'true' && inputs.dry_run != true
+        uses: actions/checkout@v7
+        with:
+          repository: jbsky/hardened-ci
+          ref: 09430d5a0016b9a356ae9f4ff4ecd642d0f437d5 # v1.4.9, meme que build-push.yml
+          path: .hardened-ci
+
+      - name: Reconstruire et regenerer le manifeste
+        if: steps.radicale.outputs.change == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          # Le mode bake de `docker compose` exige un `--allow` pour toute
+          # source de secret hors du contexte de build ; un fichier vide DANS
+          # le depot ne le demande pas (constate sur uptime-kuma-hardened).
+          CA_CERTS="$(pwd)/.ca-vide.crt"
+          : > "$CA_CERTS"
+          export CA_CERTS
+          make build
+          rm -f "$CA_CERTS"
+          python3 .hardened-ci/scripts/image-manifest.py --generate localhost/radicale-hardened:latest -o image.manifest
+          rm -rf .hardened-ci
+
+      - name: Commit, push et dispatch
+        if: steps.radicale.outputs.change == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CIBLE: ${{ steps.radicale.outputs.cible }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions.json image.manifest
+          git commit -m "build(deps): radicale ${CIBLE}" \
+            -m "Montee automatique (version-watch), attestation PyPI Kozea/Radicale verifiee."
+          pousse=false
+          for essai in 1 2 3; do
+            if git push; then pousse=true; break; fi
+            echo "push refuse (essai ${essai}) -- rebase sur l'origine"
+            git pull --rebase --autostash
+          done
+          if [ "$pousse" != true ]; then
+            echo "::error::push impossible apres 3 essais"
+            exit 1
+          fi
+          gh workflow run build-push.yml --ref main -R "$GITHUB_REPOSITORY"

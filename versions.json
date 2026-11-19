@@ -1,0 +1,6 @@
+{
+  "radicale": "3.9.2",
+  "radicale_sha256": "88a28c460af1f1c09745fefe1fb91aaf1b631499240eaaef5796a347b4c965ba",
+  "alpine": "3.24",
+  "python": "3.15"
+}
