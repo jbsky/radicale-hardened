@@ -13,7 +13,7 @@ name: base-watch
 
 on:
   schedule:
-    - cron: '0 7 * * *'
+    - cron: '56 7 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
