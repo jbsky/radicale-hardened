@@ -20,6 +20,26 @@ func TestEnv(t *testing.T) {
 	}
 }
 
+func TestExists(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "present")
+
+	if exists(present) {
+		t.Errorf("exists(%q) = true before file creation", present)
+	}
+
+	if err := os.WriteFile(present, nil, 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if !exists(present) {
+		t.Errorf("exists(%q) = false after file creation", present)
+	}
+
+	if exists(filepath.Join(dir, "absent")) {
+		t.Errorf("exists() reported true for a path that was never created")
+	}
+}
+
 func TestWriteOK(t *testing.T) {
 	dir := t.TempDir()
 	if !writeOK(dir) {
