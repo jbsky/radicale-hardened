@@ -122,7 +122,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: jbsky/hardened-ci
-          ref: d580cb8c4597ce1bf8998218a9dc07d792a3887a # v1.4.10, meme que build-push.yml
+          ref: fdb4a4afabae12204969c3123bdfc13b50d2808b # v1.4.11, meme que build-push.yml
           path: .hardened-ci
 
       - name: Reconstruire et regenerer le manifeste
